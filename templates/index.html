@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Geolocation</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.8.0/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+    }
+
+    #controls {
+      position: absolute;
+      top: 90px;
+      left: 10px;
+      color: white;
+      background: rgba(0, 0, 0, 0.731);
+      padding: 10px;
+      border-radius: 5px;
+      font-size: 14px;
+      z-index: 1000;
+    }
+
+    #speed {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      color:rgb(255, 255, 255);
+      background: rgba(34, 34, 34, 0.81);
+      padding: 10px;
+      border-radius: 5px;
+      font-size: 16px;
+      font-weight: bold;
+      z-index: 1000;
+    }
+
+    #weather {
+      position: absolute;
+      bottom: 65px;
+      left: 10px;
+      color:rgb(255, 255, 255);
+      background: rgba(34, 34, 34, 0.81);
+      padding: 10px;
+      border-radius: 5px;
+      font-size: 14px;
+      font-weight: bold;
+      z-index: 1000;
+      max-height: 200px;
+      overflow-y: auto;
+      width: 250px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="controls">
+    <label>Destination Latitude:</label>
+    <input type="text" id="dest-lat" placeholder="Enter Latitude" />
+    <label>Destination Longitude:</label>
+    <input type="text" id="dest-lng" placeholder="Enter Longitude" />
+    <label>Climate Condition:</label>
+    <select id="climate-condition">
+      <option value="4">Overcast</option>
+      <option value="6">Rainy</option>
+      <option value="1">Clear</option>
+    </select>
+    <label>Light Condition:</label>
+    <select id="light-condition">
+      <option value="5">Daylight</option>
+      <option value="2">Dark - Street Lights On</option>
+      <option value="0">Dark - No Street Lights</option>
+    </select>
+    <button onclick="setDestination()">Set Destination</button>
+  </div>
+
+  <div id="map" style="width: 100%; height: 100vh"></div>
+  <div id="speed">Speed: 0.00 km/h</div>
+  <div id="weather">Weather: Loading...</div>
+
+  <script src="https://unpkg.com/leaflet@1.8.0/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+
+  <script>
+    const apiKey = "0176756828f403f0611f4799a9e42c8c";
+    var map = L.map("map").setView([0, 0], 11);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "Leaflet &copy; OpenStreetMap contributors",
+      maxZoom: 18,
+    }).addTo(map);
+
+    var taxiIcon = L.icon({
+      iconUrl: "static/img/taxi.png",
+      iconSize: [50, 50],
+    });
+
+    var marker;
+    var routeControl;
+
+    function updateLocation(position) {
+      var lat = position.coords.latitude;
+      var lng = position.coords.longitude;
+      var speed =
+        position.coords.speed !== null
+          ? (position.coords.speed * 3.6).toFixed(2)
+          : "0.00";
+      document.getElementById("speed").innerText = `Speed: ${speed} km/h`;
+
+      if (!marker) {
+        marker = L.marker([lat, lng], { icon: taxiIcon }).addTo(map);
+        map.setView([lat, lng], 13);
+      } else {
+        marker.setLatLng([lat, lng]);
+      }
+
+      fetchWeather(lat, lng);
+    }
+
+    function handleError(error) {
+      console.warn("Error getting location", error);
+      document.getElementById("speed").innerText = `Speed: 0.00 km/h`;
+    }
+
+    if (navigator.geolocation) {
+      navigator.geolocation.watchPosition(updateLocation, handleError, {
+        enableHighAccuracy: true,
+      });
+    } else {
+      alert("Geolocation is not supported by this browser.");
+    }
+
+    function fetchWeather(lat, lng) {
+      fetch(
+        `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lng}&units=metric&appid=${apiKey}`
+      )
+        .then((response) => response.json())
+        .then((data) => {
+          const weatherDesc = data.weather[0].description;
+          const temp = data.main.temp;
+          const visibility = data.visibility
+            ? `${data.visibility} meters`
+            : "N/A";
+          document.getElementById(
+            "weather"
+          ).innerText = `Current Location Weather: ${weatherDesc}, ${temp}°C, Visibility: ${visibility}`;
+        })
+        .catch((error) =>
+          console.error("Error fetching weather data:", error)
+        );
+    }
+
+    function setDestination() {
+      let lat = parseFloat(document.getElementById("dest-lat").value);
+      let lng = parseFloat(document.getElementById("dest-lng").value);
+      let climateCondition = parseInt(document.getElementById("climate-condition").value);
+      let lightCondition = parseInt(document.getElementById("light-condition").value);
+
+      if (isNaN(lat) || isNaN(lng)) {
+        alert("Please enter valid latitude and longitude!");
+        return;
+      }
+
+      let destination = L.latLng(lat, lng);
+
+      if (!marker) {
+        alert("Please wait for your current location to be detected!");
+        return;
+      }
+
+      if (routeControl) {
+        map.removeControl(routeControl);
+      }
+
+      routeControl = L.Routing.control({
+        waypoints: [
+          L.latLng(marker.getLatLng().lat, marker.getLatLng().lng),
+          destination,
+        ],
+        routeWhileDragging: true,
+        lineOptions: {
+          styles: [{ color: "purple", weight: 5 }],
+        },
+      }).addTo(map);
+
+      routeControl.on("routesfound", function (e) {
+        console.log("Routes found:", e.routes);  // Log the routes
+        addRiskCircles(e.routes[0], climateCondition, lightCondition);
+      });
+
+      L.marker(destination).addTo(map).bindPopup("Destination").openPopup();
+    }
+
+    function addRiskCircles(route, climateCondition, lightCondition) {
+      let lastPoint = route.coordinates[0];
+      let turnCount = 0;
+      let lastJunction = null;
+
+      // Adjust risk circle frequency based on conditions
+      let segmentThreshold = 200;  // Default distance for risk check
+
+      if (climateCondition === 6 || lightCondition === 0) {
+        segmentThreshold = 100;  // More frequent in Rainy or No Street Lights
+      } else if (climateCondition === 1 && lightCondition === 5) {
+        segmentThreshold = 300;  // Less frequent in Clear Daylight
+      }
+
+      for (let i = 1; i < route.coordinates.length - 1; i++) {
+        let currentPoint = route.coordinates[i];
+        let nextPoint = route.coordinates[i + 1];
+
+        let segmentDistance = map.distance(
+          [lastPoint.lat, lastPoint.lng],
+          [currentPoint.lat, currentPoint.lng]
+        );
+
+        let angle = calculateTurnAngle(lastPoint, currentPoint, nextPoint);
+
+        if (segmentDistance >= segmentThreshold) {
+          fetch("http://127.0.0.1:5000/predict", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              latitude: parseFloat(currentPoint.lat),
+              longitude: parseFloat(currentPoint.lng),
+              weather: climateCondition,
+              road_condition: 8,
+              light_condition: lightCondition,
+              missing_feature: 0
+            }),
+          })
+            .then(response => response.json())
+            .then(data => {
+              console.log(`Prediction: ${data.severity}`);
+              displayPrediction(data.severity);
+
+              // Set circle color based on severity
+              let color = data.severity === 2 ? "red" : "orange";
+              let radius = data.severity === 2 ? 40 : 20;
+
+              L.circle([currentPoint.lat, currentPoint.lng], {
+                color: color,
+                radius: radius,
+                fillOpacity: 0.7
+              }).addTo(map).bindPopup(`Risk Level: ${data.severity}`);
+            })
+            .catch(error => console.error("Error fetching accident risk:", error));
+        }
+
+        // Adjust turn risk logic based on conditions
+        if (Math.abs(angle) > 45) {
+          turnCount++;
+
+          let turnRiskThreshold = climateCondition === 6 ? 2 : 3;  // More turns are risky in Rain
+
+          if (turnCount % turnRiskThreshold === 0) {
+            L.circle([currentPoint.lat, currentPoint.lng], {
+              color: "orange",
+              radius: 15,
+              fillOpacity: 0.7
+            }).addTo(map).bindPopup(`Turn ${turnCount} - Moderate Risk`);
+          }
+        }
+
+        // Junction risk logic
+        if (Math.abs(angle) > 90) {
+          let junctionSpacing = climateCondition === 6 ? 200 : 300;  // More junctions in rain
+
+          if (!lastJunction || map.distance([lastJunction.lat, lastJunction.lng], [currentPoint.lat, currentPoint.lng]) > junctionSpacing) {
+            L.circle([currentPoint.lat, currentPoint.lng], {
+              color: "red",
+              radius: 30,
+              fillOpacity: 0.9
+            }).addTo(map).bindPopup("Junction - High Risk");
+            lastJunction = currentPoint;
+          }
+        }
+
+        lastPoint = currentPoint;
+      }
+    }
+
+    function calculateTurnAngle(p1, p2, p3) {
+      let angle1 = Math.atan2(p2.lat - p1.lat, p2.lng - p1.lng) * (180 / Math.PI);
+      let angle2 = Math.atan2(p3.lat - p2.lat, p3.lng - p2.lng) * (180 / Math.PI);
+      return angle2 - angle1;
+    }
+
+    function displayPrediction(severity) {
+      console.log(`Predicted Severity: ${severity}`);
+    }
+  </script>
+
+  <script>
+    (function(){if(!window.chatbase||window.chatbase("getState")!=="initialized"){window.chatbase=(...arguments)=>{if(!window.chatbase.q){window.chatbase.q=[]}window.chatbase.q.push(arguments)};window.chatbase=new Proxy(window.chatbase,{get(target,prop){if(prop==="q"){return target.q}return(...args)=>target(prop,...args)}})}const onLoad=function(){const script=document.createElement("script");script.src="https://www.chatbase.co/embed.min.js";script.id="2srsJ2GRKmgY-nDr01HnU";script.domain="www.chatbase.co";document.body.appendChild(script)};if(document.readyState==="complete"){onLoad()}else{window.addEventListener("load",onLoad)}})();
+  </script>
+</body>
+
+</html>
